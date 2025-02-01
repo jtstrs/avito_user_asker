@@ -1,0 +1,3 @@
+[submodule "src/deps/common_avito_utils"]
+	path = src/deps/common_avito_utils
+	url = git@github.com:jtstrs/common_avito_utils.git
