@@ -1,6 +1,5 @@
 import logging
 import asyncio
-import json
 from typing import Any
 from src.deps.common_avito_utils.redis_wrapper.redis_wrapper import Redis
 from src.deps.common_avito_utils.avito import AVITO_TO_TELEGRAM_CHANNEL_NAME
@@ -20,11 +19,7 @@ class AvitoAskerService:
 
     def on_message_received_callback(self, message: dict[str, Any]):
         self.logger.info("Receive new message %s. Post it to telegram without handling", message)
-        message["data"] = str(message["data"])
-        message["channel"] = str(message["channel"])
-
-        serialized_message = json.dumps(message)
-        asyncio.create_task(self.redis.get_connection().post_to_channel(channel=AVITO_TO_TELEGRAM_CHANNEL_NAME, message=str(serialized_message)))
+        asyncio.create_task(self.redis.get_connection().post_to_channel(channel=AVITO_TO_TELEGRAM_CHANNEL_NAME, message=message["data"]))
 
     def on_redis_listen_cancelled(self, exception: RuntimeError):
         if not exception:
