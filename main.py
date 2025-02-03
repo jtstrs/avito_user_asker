@@ -16,6 +16,9 @@ async def main(app_conf: Dict[str, Any], logger: logging.Logger):
     asker_service = AvitoAskerService(app_conf=app_conf, redis=redis, logger=logger)
     await asker_service.start_service()
 
+    while True:
+        await asyncio.sleep(0)
+
 if __name__ == "__main__":
     dotenv_path = os.path.join(os.path.dirname(__file__), ".env")
     if os.path.exists(dotenv_path):
@@ -32,4 +35,4 @@ if __name__ == "__main__":
              '\n'.join([key + " : " + str(app_config[key])
                          for key in app_config if not config_field_secure(key)]))
 
-    asyncio.run(main(app_conf=app_config))
+    asyncio.run(main(app_conf=app_config, logger=logger))
