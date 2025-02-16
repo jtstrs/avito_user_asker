@@ -50,7 +50,7 @@ class AvitoAskerService:
         self.message_listen_task = asyncio.create_task(self.redis.listen())
 
     async def register_new_user(self, avito_id: int, chat_owner_id: int, chat_id: str):
-        lead = LeadModel(avito_id=avito_id, ads_owner_id=chat_owner_id, ads_id=chat_id, autoask_state=AVITO_ASKING_FORM_INIT_STATE, meta=[])
+        lead = LeadModel(avito_id=avito_id, ads_owner_id=chat_owner_id, ads_id=chat_id, autoask_state=AVITO_ASKING_FORM_INIT_STATE, meta={})
         response = await self.database[AVITO_LEADS_COLLECTION_NAME].insert_one(lead.model_dump())
         self.logger.debug("Register new lead with oid %s", response.inserted_id)
         return lead
@@ -89,10 +89,8 @@ class AvitoAskerService:
         state = lead.autoask_state
         field = self.asking_form[state]["field"]
 
-        await self.database[AVITO_LEADS_COLLECTION_NAME].update_one({"avito_id": lead.avito_id}, { "$push": {
-            "meta": { 
-                field: state_input 
-                }
+        await self.database[AVITO_LEADS_COLLECTION_NAME].update_one({"avito_id": lead.avito_id}, { "$set": {
+            "meta.{0}".format(field): state_input
             } })
 
         next_state = self.asking_form[state]["next_state"]
@@ -105,6 +103,12 @@ class AvitoAskerService:
             return 
         lead.autoask_state = next_state
         await self.handle_message_state(lead)
+
+    async def handle_notify_autoask_state(self, lead: LeadModel):
+        pass
+        # autoask_result_builder = ""
+        # user_info_ = "\n".join([field.keys() for field in lead.meta])
+        # meta_info = lead.meta
 
     async def handle_incoming_message(self, message: dict[str, Any]):
         message_data = json.loads(message["data"])
