@@ -4,9 +4,19 @@ import json
 from pymongo import AsyncMongoClient
 from typing import Any
 from src.deps.common_avito_utils.redis_wrapper.redis_wrapper import Redis
+
 from src.deps.common_avito_utils.avito import AVITO_TO_TELEGRAM_CHANNEL_NAME, TELEGRAM_TO_AVITO_CHANNEL_NAME
+
 from src.deps.common_avito_utils.avito import AVITO_AUTORESPONSE_DATABASE_NAME, AVITO_LEADS_COLLECTION_NAME, AVITO_ASKING_FORM_COLLECTION_NAME
-from src.deps.common_avito_utils.avito import AVITO_ASKING_FORM_INIT_STATE, AVITO_ADMIN_ACCOUNT_ID
+
+from src.deps.common_avito_utils.avito import (AVITO_ASKING_FORM_WAIT_INPUT_FROM_USER_STATE, 
+                                               AVITO_ASKING_FORM_WRITE_MESSAGE_TO_USER_STATE, 
+                                               AVITO_ASKING_FORM_FORWARD_REPORT_TO_REDIS_STATE,
+                                               AVITO_ASKING_FORM_FINISHED_STATE,
+                                               AVITO_ASKING_FORM_INIT_STATE)
+
+from src.deps.common_avito_utils.avito import AVITO_ADMIN_ACCOUNT_ID
+
 from src.deps.common_avito_utils.avito_data_models import LeadModel, InternalMessageModel
 
 class AvitoAskerService:
@@ -80,12 +90,12 @@ class AvitoAskerService:
             return
 
         lead.autoask_state = next_state_name
-        if next_state["type"] == "message":
+        if next_state["type"] == AVITO_ASKING_FORM_WRITE_MESSAGE_TO_USER_STATE:
             await self.handle_message_state(lead)
-        elif next_state["type"] == "input":
+        elif next_state["type"] == AVITO_ASKING_FORM_WAIT_INPUT_FROM_USER_STATE:
             # Do nothing. Just wait for user input
             pass
-        elif next_state["type"] == "notify_autoask":
+        elif next_state["type"] == AVITO_ASKING_FORM_FORWARD_REPORT_TO_REDIS_STATE:
             await self.handle_notify_autoask_state(lead)
 
     async def handle_input_state(self, lead: LeadModel, state_input: str):
@@ -155,18 +165,17 @@ class AvitoAskerService:
 
         state_type = self.asking_form[lead.autoask_state]["type"]
 
-        self.logger.debug("Next message state is %s", state_type)
+        self.logger.debug("Handle state: %s for lead %d", lead.autoask_state, lead.avito_id)
 
-        if state_type == "message":
+        if state_type == AVITO_ASKING_FORM_WRITE_MESSAGE_TO_USER_STATE:
             await self.handle_message_state(lead)
             return
 
-        if state_type == "input":
+        if state_type == AVITO_ASKING_FORM_WAIT_INPUT_FROM_USER_STATE:
             await self.handle_input_state(lead, message_content)
             return
 
-        autoask_finished = not lead.autoask_state
-        if  autoask_finished:
+        if  state_type == AVITO_ASKING_FORM_FINISHED_STATE:
             message = InternalMessageModel(avito_account_id=lead.ads_owner_id, 
                                                     avito_chat_id=lead.ads_id,
                                                     from_account_id=lead.avito_id,
