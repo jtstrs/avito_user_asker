@@ -133,20 +133,23 @@ class AvitoAskerService:
             return 
 
     async def handle_incoming_message(self, message: dict[str, Any]):
-        message_data = json.loads(message["data"])
-        sender_id = message_data["sender"]
-        user_id = message_data["received"]
-        avito_chat = message_data["chat_id"]
-        message_content = message_data["text"]
+        message = InternalMessageModel.model_validate_json(json.loads(message["data"]))
+
+        lead_id = message.from_account_id
+        ads_owner_id = message.avito_account_id
+        ads_id = message.avito_chat_id
+        message_content = message.message_content
 
         # Skip messages from avito
-        if sender_id == AVITO_ADMIN_ACCOUNT_ID:
+        if lead_id == AVITO_ADMIN_ACCOUNT_ID:
             return
 
-        lead_data = await self.database[AVITO_LEADS_COLLECTION_NAME].find_one({"avito_id": sender_id})
+        lead_data = await self.database[AVITO_LEADS_COLLECTION_NAME].find_one({"avito_id": lead_id})
 
         if not lead_data:
-            lead = await self.register_new_user(avito_id=sender_id, chat_owner_id=user_id, chat_id=avito_chat)
+            lead = await self.register_new_user(avito_id=lead_id,
+                                                chat_owner_id=ads_owner_id,
+                                                chat_id=ads_id)
         else:
             lead = LeadModel.model_validate(lead_data)
 
@@ -164,12 +167,17 @@ class AvitoAskerService:
 
         autoask_finished = not lead.autoask_state
         if  autoask_finished:
-            await self.redis.get_connection().post_to_channel(channel=AVITO_TO_TELEGRAM_CHANNEL_NAME, message=message["data"])
+            message = InternalMessageModel(avito_account_id=lead.ads_owner_id, 
+                                                    avito_chat_id=lead.ads_id,
+                                                    from_account_id=lead.avito_id,
+                                                    message_content=message_content)
+            await self.redis.get_connection().post_to_channel(channel=AVITO_TO_TELEGRAM_CHANNEL_NAME, message=message.model_dump_json())
 
 
     def handle_message_task_cancelling(self, task):
-        if task.exception():
-            self.logger.error("Error happened during handling message. Reason: %s", str(task.exception()))
+        raised_exception = task.exception()
+        if raised_exception:
+            self.logger.error("Error happened during handling message. Reason: %s", raised_exception)
 
     def on_message_received_callback(self, message: dict[str, Any]):
         message_task = asyncio.create_task(self.handle_incoming_message(message=message))
