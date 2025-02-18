@@ -7,7 +7,7 @@ from src.deps.common_avito_utils.redis_wrapper.redis_wrapper import Redis
 from src.deps.common_avito_utils.avito import AVITO_TO_TELEGRAM_CHANNEL_NAME, TELEGRAM_TO_AVITO_CHANNEL_NAME
 from src.deps.common_avito_utils.avito import AVITO_AUTORESPONSE_DATABASE_NAME, AVITO_LEADS_COLLECTION_NAME, AVITO_ASKING_FORM_COLLECTION_NAME
 from src.deps.common_avito_utils.avito import AVITO_ASKING_FORM_INIT_STATE, AVITO_ADMIN_ACCOUNT_ID
-from src.deps.common_avito_utils.avito_data_models import LeadModel, InternalMessageModel, MongoIdModel
+from src.deps.common_avito_utils.avito_data_models import LeadModel, InternalMessageModel
 
 class AvitoAskerService:
     async def connect_to_mongo(self, mongo_client: AsyncMongoClient) -> bool:
@@ -60,6 +60,7 @@ class AvitoAskerService:
         message_content = state_info["question"]
         message = InternalMessageModel(avito_account_id=lead.ads_owner_id, 
                                                 avito_chat_id=lead.ads_id,
+                                                from_account_id=lead.avito_id,
                                                 message_content=message_content)
 
         await self.redis.get_connection().post_to_channel(channel=TELEGRAM_TO_AVITO_CHANNEL_NAME, message=message.model_dump_json())
@@ -78,12 +79,14 @@ class AvitoAskerService:
         if not next_state:
             return
 
+        lead.autoask_state = next_state_name
         if next_state["type"] == "message":
-            lead.autoask_state = next_state_name
             await self.handle_message_state(lead)
         elif next_state["type"] == "input":
             # Do nothing. Just wait for user input
             pass
+        elif next_state["type"] == "notify_autoask":
+            await self.handle_notify_autoask_state(lead)
 
     async def handle_input_state(self, lead: LeadModel, state_input: str):
         state = lead.autoask_state
@@ -92,6 +95,7 @@ class AvitoAskerService:
         await self.database[AVITO_LEADS_COLLECTION_NAME].update_one({"avito_id": lead.avito_id}, { "$set": {
             "meta.{0}".format(field): state_input
             } })
+        lead.meta[field] = state_input
 
         next_state = self.asking_form[state]["next_state"]
         response = await self.database[AVITO_LEADS_COLLECTION_NAME].update_one({"avito_id": lead.avito_id}, {"$set": {
@@ -105,10 +109,28 @@ class AvitoAskerService:
         await self.handle_message_state(lead)
 
     async def handle_notify_autoask_state(self, lead: LeadModel):
-        pass
-        # autoask_result_builder = ""
-        # user_info_ = "\n".join([field.keys() for field in lead.meta])
-        # meta_info = lead.meta
+        autoask_result_builder = ""
+        meta_info = "\n".join([ key + ": " + value  for key, value in lead.meta.items()])
+
+        self.logger.debug("Autoask finished. Collected meta info: %s", meta_info)
+
+        autoask_result_builder = "New request\n" + meta_info
+
+        message = InternalMessageModel(avito_account_id=lead.ads_owner_id, 
+                                                avito_chat_id=lead.ads_id,
+                                                from_account_id=lead.avito_id,
+                                                message_content=autoask_result_builder)
+        await self.redis.get_connection().post_to_channel(channel=AVITO_TO_TELEGRAM_CHANNEL_NAME, message=message.model_dump_json())
+
+        state_info = self.asking_form[lead.autoask_state]
+        next_state_name = state_info["next_state"]
+        response = await self.database[AVITO_LEADS_COLLECTION_NAME].update_one({"avito_id": lead.avito_id}, {"$set": {
+            "autoask_state": next_state_name
+        }})
+
+        if response.matched_count < 0:
+            self.logger.warning("Couldnt update state for user with avito id %d. Init state: %s. Target state: %s", lead.autoask_state, next_state_name)
+            return 
 
     async def handle_incoming_message(self, message: dict[str, Any]):
         message_data = json.loads(message["data"])
